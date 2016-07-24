@@ -1,67 +1,118 @@
 <?php
-
 /**
  * SIM Web Services
+ *
+ * @copyright 2015 lbtsoft
+ * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ *
  */
+ 
 require_once $CFG->dirroot.'/grade/lib.php';
 require_once($CFG->libdir . "/externallib.php");
 require_once($CFG->libdir . "/gradelib.php");
-//require_once('/usr/share/moodle/config.php');
-//require_once('/usr/share/moodle/lib/gradelib.php');
 
 //ini_set('display_errors', 1);
 //ini_set('display_startup_errors', 1);
 //error_reporting(E_ALL);
 
-define("MEAN_OF_GRADES", 0);
-define("WEIGHTED_MEAN", 10);
-define("SIMPLE_WEIGHTED_MEAN", 11);
+/**
+ * LOCAL_WSSIM_MEAN_OF_GRADES - constant for gradebook calculations
+ */
+define("LOCAL_WSSIM_MEAN_OF_GRADES", 0);
 
+/**
+ * LOCAL_WSSIM_WEIGHTED_MEAN - constant for gradebook calculations
+ */
+define("LOCAL_WSSIM_WEIGHTED_MEAN", 10);
 
+/**
+ * LOCAL_WSSIM_SIMPLE_WEIGHTED_MEAN - constant for gradebook calculations
+ */
+define("LOCAL_WSSIM_SIMPLE_WEIGHTED_MEAN", 11);
+
+/**
+ * Functions in the wssim web service
+ *
+ * These functions support the Student Information Manager external system
+ *
+ * @package    local_wssim
+ * @copyright  2015 lbtsoft
+ * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ */
 class local_wssim_external extends external_api {
 		
-		// needed for get_gradebook
-		private static $categories;
-		private static $categoriesout; 
-		//private static $categorytotals = array();
-		private static $itemsout;
-		private static $activation_trigger;
+	/**
+	 * @var array $categories		An array of item categories within the Moodle grade book. Populatied by get_categories()
+	 */
+	private static $categories;
+	
+	/**
+	 * @var string $categoriesout	An HTML-formatted list of item categories within the Moodle grade book. Populatied by get_categories() and used for debugging.
+	 */
+	private static $categoriesout; 
 
-    // Returns description of method parameters
-    public static function hello_world_parameters() {
-      return new external_function_parameters(
-				array('welcomemessage' => new external_value(PARAM_TEXT, 'The test message. By default it is "You have successfully connected to SIM Web Services on your Moodle!"', VALUE_DEFAULT, 'You have successfully connected to SIM Web Services on your Moodle!'))
-      );
+	/**
+	 * @var string $itemsout		An HTML-formatted list of items within the Moodle grade book. Populatied by get_items() and used for debugging.
+	 */
+	private static $itemsout;
+
+	/**
+	 * @var int $activationtrigger	An integer variable used to track whether a course has an activation trigger. 0=no, 1=yes
+	 */
+	private static $activationtrigger;
+
+// WELCOME MESSAGE /////////////////////////////////////////////////////////////////////////////////////////////
+	
+	/**
+	 * Returns description of method parameters for hello_world
+	 */
+	public static function hello_world_parameters() {
+		return new external_function_parameters(
+			array('welcomemessage' => new external_value(PARAM_TEXT, 'The test message. By default it is "You have successfully connected to SIM Web Services on your Moodle!"', VALUE_DEFAULT, 'You have successfully connected to SIM Web Services on your Moodle!'))
+		);
+	}
+	
+	/**
+	 * Returns welcome message as passed from external application. This confirms a successful install of wssim
+	 *
+	 * @param string 	$welcomemessage The message passed from the calling SIM installation
+	 * @return string 	A message indicating success or failure (simply echoing back the $welcomemessage passed by the caller)
+	 */
+	public static function hello_world($welcomemessage) {
+		global $USER;
+		//Parameter validation -- REQUIRED
+		$params = self::validate_parameters(self::hello_world_parameters(), array('welcomemessage' => $welcomemessage));
+		//Context validation -- OPTIONAL but in most web service it should present
+		$context = get_context_instance(CONTEXT_USER, $USER->id);
+		self::validate_context($context);
+		//Capability checking -- OPTIONAL but in most web service it should present
+		if (!has_capability('moodle/user:viewdetails', $context)) {
+			throw new moodle_exception('cannotviewprofile');
+		}
+		return $params['welcomemessage'];
     }
-    // Returns welcome message
-    public static function hello_world($welcomemessage) {
-        global $USER;
-        //Parameter validation -- REQUIRED
-        $params = self::validate_parameters(self::hello_world_parameters(), array('welcomemessage' => $welcomemessage));
-        //Context validation -- OPTIONAL but in most web service it should present
-        $context = get_context_instance(CONTEXT_USER, $USER->id);
-        self::validate_context($context);
-        //Capability checking -- OPTIONAL but in most web service it should present
-        if (!has_capability('moodle/user:viewdetails', $context)) {
-            throw new moodle_exception('cannotviewprofile');
-        }
-        return $params['welcomemessage']; // . $USER->firstname ;
-    }
-    // Returns description of method result value
-    public static function hello_world_returns() {
-        return new external_value(PARAM_TEXT, 'The welcome message'); // + user first name');
-    }
+	
+	/**
+	 * Returns description of method result value for hello_world
+	 */
+	public static function hello_world_returns() {
+		return new external_value(PARAM_TEXT, 'The welcome message');
+	}
 
 // GET COURSE NAMES /////////////////////////////////////////////////////////////////////////////////////////////
 
-    // Returns description of method parameters
+	/**
+	 * Returns description of method parameters for get_course_names
+	 */
     public static function get_course_names_parameters() {
         return new external_function_parameters(
 					array()
         );
     }
 
-    // Returns course names and ids
+	/**
+	 * Returns all course names and ids
+	 */
     public static function get_course_names() {
         global $DB;
         //Parameter validation
@@ -75,83 +126,108 @@ class local_wssim_external extends external_api {
 				return json_encode($courses);
     }
 		
-    // Returns description of method result value
+	/**
+	 * Returns description of method result value for get_course_names
+	 */
     public static function get_course_names_returns() {
         return new external_value(PARAM_TEXT, 'For each course, returns json array of id,fullname,shortname,idnumber.');
     }
 
 // GET COURSE TEACHERS ///////////////////////////////////////////////////////////////////////////////////////////
 
-    // Returns description of method parameters
-    public static function get_course_teachers_parameters() {
-        return new external_function_parameters(
-					array('courseid' => new external_value(PARAM_TEXT, 'The value in the Course ID number field of Moodle\'s course settings page', VALUE_DEFAULT, ''),
-								'courseshortname' => new external_value(PARAM_TEXT, 'The value in the Course short name field of Moodle\'s course settings page', VALUE_DEFAULT, ''))
+	/**
+	 * Returns description of method parameters for get_course_teachers
+	 */
+	public static function get_course_teachers_parameters() {
+		return new external_function_parameters(
+			array('courseid' => new external_value(PARAM_TEXT, 'The value in the Course ID number field of Moodle\'s course settings page', VALUE_DEFAULT, ''),
+				  'courseshortname' => new external_value(PARAM_TEXT, 'The value in the Course short name field of Moodle\'s course settings page', VALUE_DEFAULT, '')
+			)
         );
     }
-    // Returns teacher's username, lastname, firstname
+
+	/**
+	 * Returns teacher's username, lastname, firstname
+	 *
+	 * @param string $courseid 			The ID string used by SIM to uniquely identify this course (expected to be in the 'Course ID number' field in Moodle's course settings page)
+	 * @param string $courseshortname 	The value in the 'Course short name' field in Moodle's course settings page. Used as an alternative to $courseid.
+	 * @return string 					A json array of the teachers and editing teachers in the course. Each element in the array is a json array of: username, firstname, lastname.
+	 */
     public static function get_course_teachers($courseid,$courseshortname) {
-			global $DB;
-			//Parameter validation -- REQUIRED
-			$params = self::validate_parameters(self::get_course_teachers_parameters(),
-					array('courseid' => $courseid, 'courseshortname' => $courseshortname)
-			);
-
-			// build the query
-			$sql = "SELECT DISTINCT usr.username, usr.lastname, usr.firstname  
-								FROM {course} c 
-								JOIN {context} cx ON c.id = cx.instanceid AND cx.contextlevel = '50' 
-								JOIN {role_assignments} ra ON cx.id = ra.contextid 
-								JOIN {role} r ON ra.roleid = r.id 
-								JOIN {user} usr ON ra.userid = usr.id 
-							 WHERE (r.name = 'teacher' 
-										 OR r.name='editingteacher' 
-										 OR r.shortname = 'teacher' 
-										 OR r.shortname='editingteacher')";
-
-			if(!empty($params['courseid'])):
-				$sql .= " AND c.idnumber = :parm";
-				$parm = $params['courseid'];
-			elseif(!empty($params['courseshortname'])):
-				$sql .= " AND c.shortname = :parm";
-				$parm = $params['courseshortname'];
-			endif;
-
-			if( $parm ):
-				$records = $DB->get_records_sql($sql, array('parm'=>$parm));
-				foreach($records as $record):
-					$teachers[] = (array)$record;
-				endforeach;
-
-				return json_encode($teachers);
-
-			endif;
+		global $DB;
+		//Parameter validation -- REQUIRED
+		$params = self::validate_parameters(self::get_course_teachers_parameters(),
+			array('courseid' => $courseid, 'courseshortname' => $courseshortname)
+		);
+		
+		// build the query
+		$sql = "SELECT DISTINCT usr.username, usr.lastname, usr.firstname  
+				  FROM {course} c 
+				  JOIN {context} cx ON c.id = cx.instanceid AND cx.contextlevel = '50' 
+				  JOIN {role_assignments} ra ON cx.id = ra.contextid 
+				  JOIN {role} r ON ra.roleid = r.id 
+				  JOIN {user} usr ON ra.userid = usr.id 
+				 WHERE (r.name = 'teacher' 
+					OR r.name='editingteacher' 
+					OR r.shortname = 'teacher' 
+					OR r.shortname='editingteacher')";
+		
+		if( !empty($params['courseid']) ):
+			$sql .= " AND c.idnumber = :parm";
+			$parm = $params['courseid'];
+		elseif( !empty($params['courseshortname']) ):
+			$sql .= " AND c.shortname = :parm";
+			$parm = $params['courseshortname'];
+		endif;
+		
+		if( $parm ):
+			$records = $DB->get_records_sql($sql, array('parm'=>$parm));
+			foreach($records as $record):
+				$teachers[] = (array)$record;
+			endforeach;
+		
+			return json_encode($teachers);
+		
+		endif;
     }
 
-    // Returns description of method result value
+	/**
+	 * Returns description of method result value for get_course_teachers
+	 */
     public static function get_course_teachers_returns() {
         return new external_value(PARAM_TEXT, 'Returns a json array of the teachers in the specified course. Each element in the teachers array is a json array of: username, lastname, firstname.');
     }
 
 // GET COURSE ACTIVITY ///////////////////////////////////////////////////////////////////////////////////////////
-// Date of last access for one or more students in a specified course
 
-    // Returns description of method parameters
+	/**
+	 * Returns description of method parameters for get_course_activity
+	 */
     public static function get_course_activity_parameters() {
         return new external_function_parameters(
-					array(
-						'courseid' => new external_value(PARAM_TEXT, 'The value in the Course ID number field of Moodle\'s course settings page', VALUE_DEFAULT, ''),
-						'courseshortname' => new external_value(PARAM_TEXT, 'The value in the Course short name field of Moodle\'s course settings page', VALUE_DEFAULT, ''),
-						'studentids' => new external_value(PARAM_TEXT, 'A csv list of student ID numbers (PENs). Omit to get date of last access for all students.', VALUE_DEFAULT, '')
-					)
+			array(
+				'courseid' => new external_value(PARAM_TEXT, 'The value in the Course ID number field of Moodle\'s course settings page', VALUE_DEFAULT, ''),
+				'courseshortname' => new external_value(PARAM_TEXT, 'The value in the Course short name field of Moodle\'s course settings page', VALUE_DEFAULT, ''),
+				'studentids' => new external_value(PARAM_TEXT, 'A csv list of student ID numbers (PENs). Omit to get date of last access for all students.', VALUE_DEFAULT, '')
+			)
         );
     }
-    // Returns date of last access, indexed by PEN (or whatever is in the student ID number field)
+
+	/**
+	 * Returns date of last access, indexed by PEN (or whatever is in the student ID number field) for one or more students in the specified course
+	 *
+	 * @param string $courseid 			The ID string used by SIM to uniquely identify this course (expected to be in the 'Course ID number' field in Moodle's course settings page)
+	 * @param string $courseshortname 	The value in the 'Course short name' field in Moodle's course settings page. Used as an alternative to $courseid.
+	 * @param string $studentids		A csv list of student ID numbers (PENs). Omit to get date of last access for all students.
+	 * @return string 					A json array of date of last access, indexed by student ID number (e.g. PEN). 
+	 *									Returned data can be limited to specific student(s) by specifying a csv list of student ID numbers, 
+	 *									and omitting a course specification returns date of last access in any course for the specified student(s).
+	 */
     public static function get_course_activity($courseid,$courseshortname,$studentids) {
 			global $DB;
 			//Parameter validation -- REQUIRED
 			$params = self::validate_parameters(self::get_course_activity_parameters(),
-					array('courseid' => $courseid, 'courseshortname' => $courseshortname, 'studentids' => $studentids)
+				array('courseid' => $courseid, 'courseshortname' => $courseshortname, 'studentids' => $studentids)
 			);
 
 			// build the query
@@ -178,10 +254,10 @@ class local_wssim_external extends external_api {
 			if( $crs ):
 				// just looking for students who are in the specified course
 				$sql .= "SELECT usr.idnumber AS studentid, DATE( FROM_UNIXTIME( la.timeaccess ) ) AS lastaccessdate
-									 FROM {user_lastaccess} la
-						 			 JOIN {course} c ON la.courseid = c.id
-						 			 JOIN {user} usr ON la.userid = usr.id
-						 			WHERE $crs";
+						   FROM {user_lastaccess} la
+						   JOIN {course} c ON la.courseid = c.id
+						   JOIN {user} usr ON la.userid = usr.id
+						  WHERE $crs";
 				if( $stu ):
 					// limit the query to the specified students who are in the specified course
 					$sql .= " AND $stu";
@@ -189,9 +265,9 @@ class local_wssim_external extends external_api {
 			elseif( $stu ):
 				// looking for the specified students regardless of course
 				$sql .= "SELECT usr.idnumber AS studentid, DATE( FROM_UNIXTIME( la.timeaccess ) ) AS lastaccessdate
-									 FROM {user_lastaccess} la
-						 			 JOIN {user} usr ON la.userid = usr.id 
-									WHERE $stu";
+						   FROM {user_lastaccess} la
+						   JOIN {user} usr ON la.userid = usr.id 
+						  WHERE $stu";
 			endif;
 			
 			// merge the parameter arrays into a single array
@@ -208,15 +284,18 @@ class local_wssim_external extends external_api {
 			endif;
     }
 		
-    // Returns description of method result value
+	/**
+	 * Returns description of method result value for get_course_activity
+	 */
     public static function get_course_activity_returns() {
         return new external_value(PARAM_TEXT, 'For all students in a specified course (by short name or by ID number), returns date of last access in a json array indexed by student ID number (e.g. PEN). Returned data can be limited to specific student(s) by specifying a csv list of student ID numbers, and omitting a course specification returns date of last access in any course for the specified student(s).');
     }
 
 // GET STUDENT ACTIVITY ///////////////////////////////////////////////////////////////////////////////////////////
-// Date of last access for one student in one or more courses
 
-    // Returns description of method parameters
+	/**
+	 * Returns description of method parameters for get_student_activity
+	 */
     public static function get_student_activity_parameters() {
         return new external_function_parameters(
 					array(
@@ -225,7 +304,14 @@ class local_wssim_external extends external_api {
 					)
         );
     }
-    // Returns date of last access, indexed by PEN (or whatever is in the student ID number field)
+	
+	/**
+	 * Returns date of last access (indexed by course ID) for one student in the specified course
+	 *
+	 * @param string $studentid			The student's ID number (PEN).
+	 * @param string $courseids 		A csv list of the ID string used by SIM to uniquely identify this course (expected to be in the 'Course ID number' field in Moodle's course settings page)
+	 * @return string 					A json array of students, indexed by student ID. Each student's record is a json array of dates of last access, indexed by course ID. 
+	 */
     public static function get_student_activity($studentid,$courseids) {
 			global $DB;
 			//Parameter validation -- REQUIRED
@@ -252,11 +338,11 @@ class local_wssim_external extends external_api {
 			
 			if( $stu && $crs ):
 				$sql = "SELECT c.idnumber AS courseid, DATE( FROM_UNIXTIME( la.timeaccess ) ) AS lastaccessdate
-									FROM {user_lastaccess} la
-									JOIN {course} c ON la.courseid = c.id
-									JOIN {user} usr ON la.userid = usr.id
-								 WHERE $crs 
-								 			 AND $stu";	
+						  FROM {user_lastaccess} la
+						  JOIN {course} c ON la.courseid = c.id
+						  JOIN {user} usr ON la.userid = usr.id
+						 WHERE $crs 
+							   AND $stu";	
 				if( $sql ):
 
 					if($records = $DB->get_records_sql($sql,$parms)):
@@ -272,92 +358,106 @@ class local_wssim_external extends external_api {
 				endif;
 			endif;
     }
-    // Returns description of method result value
+	
+	/**
+	 * Returns description of method result value for get_course_activity
+	 */
     public static function get_student_activity_returns() {
         return new external_value(PARAM_TEXT, 'For a single student (specified by student ID number), returns date of last access for each course (specified in a csv list of course IDs) in a json array indexed by course ID number.');
     }
 
 // GET GROUP ACTIVITY ///////////////////////////////////////////////////////////////////////////////////////////
-// Date of last access for multiple students in one or more courses
 
-    // Returns description of method parameters
+	/**
+	 * Returns description of method parameters for get_group_activity
+	 */
     public static function get_group_activity_parameters() {
         return new external_function_parameters(
-					array(
-						'studentidscourseids' => new external_value(PARAM_TEXT, 'A list of student ID numbers (PEN) and course ID numbers. Data layout is studentid,courseid|studentid,courseid,courseid|studentid,courseid|etc.', VALUE_DEFAULT, '')
-					)
+			array(
+				'studentidscourseids' => new external_value(PARAM_TEXT, 'A list of student ID numbers (PEN) and course ID numbers. Data layout is studentid,courseid|studentid,courseid,courseid|studentid,courseid|etc.', VALUE_DEFAULT, '')
+			)
         );
     }
-    // Returns date of last access, indexed by PEN (or whatever is in the student ID number field)
-    public static function get_group_activity($studentidscourseids) {
-			global $DB;
-			//Parameter validation -- REQUIRED
-			$params = self::validate_parameters(self::get_group_activity_parameters(),
-					array('studentidscourseids' => $studentidscourseids)
-			);
-			//echo "<pre>\$params = ".print_r($params,true)."</pre>";		
-			if( !empty($params['studentidscourseids']) ):
-				$students = explode('|',$params['studentidscourseids']);
-				//echo "<pre>\$students = ".print_r($students,true)."</pre>";		
-				foreach($students as $studentidcourseids):
-					// make sure that the previous student's data doesn't carry forward
-					unset($student,$parms);
-					// get the divider between the studentid and the first courseid
-					$firstcommapos = strpos($studentidcourseids,',');
-					if( $firstcommapos>0 ):
-						$studentid = substr($studentidcourseids,0,$firstcommapos);
-						$courseids = substr($studentidcourseids,$firstcommapos+1);
-						$temp = str_replace("'","",$courseids); // we don't want these wrapped in single quotes
-						$arrCourseids = explode(',',$temp);
-						
-						if( $courseids ):
-							// we can't pass a csv list as a parameter because it is seen as a single value with embedded commas
-							// -> convert the csv list to an array
-							// -> use get_in_or_equal() to create the list
-							// -> original specification for this function was to pass singlequote-delimited courseids
-							$temp = str_replace("'","",$courseids); // make sure the single quotes are gone
-							$arrCourseids = explode(',',$temp);
-							list($insql, $parms) = $DB->get_in_or_equal($arrCourseids);
-							$crs = "c.idnumber $insql";
-						endif;
-			
-						if( $studentid ):
-							$stu = "usr.idnumber = ?";
-							$parms[] = $studentid;
-						endif;
-					
-						if( $stu && $crs ):
-
-							// initialize each course with '0000-00-00'
-							// -> if the student has never logged in then we won't get anything back from Moodle
-							foreach($arrCourseids as $courseid):
-								$student[$courseid] = '0000-00-00';
-							endforeach;
-
-							$sql = "SELECT c.idnumber AS courseid, DATE( FROM_UNIXTIME( la.timeaccess ) ) AS lastaccessdate 
-												FROM {user_lastaccess} la 
-												JOIN {course} c ON la.courseid = c.id 
-												JOIN {user} usr ON la.userid = usr.id 
-											 WHERE $crs 
-											 			 AND $stu";	
-							// get the dates
-							if($records = $DB->get_records_sql($sql,$parms)):
-								foreach($records as $record):
-									$student[strtolower($record->courseid)] = $record->lastaccessdate;
-								endforeach;
-							endif;
-							
-							$activity[$studentid] = $student;
-							
-						endif;
-					endif;
-				endforeach;
-
-				return json_encode($activity);
 	
-			endif;
+	/**
+	 * Returns date of last access (indexed by student ID) for multiple students in multiple courses
+	 *
+	 * @param string $studentidscourseids	A list of student ID numbers (PEN) and course ID numbers. 
+	 *										Data layout is studentid,courseid|studentid,courseid,courseid|studentid,courseid|etc.
+	 * @return string 						A json array of date of last access, indexed by course ID. 
+	 */
+    public static function get_group_activity($studentidscourseids) {
+		global $DB;
+		//Parameter validation -- REQUIRED
+		$params = self::validate_parameters(self::get_group_activity_parameters(),
+				array('studentidscourseids' => $studentidscourseids)
+		);
+		//echo "<pre>\$params = ".print_r($params,true)."</pre>";		
+		if( !empty($params['studentidscourseids']) ):
+			$students = explode('|',$params['studentidscourseids']);
+			//echo "<pre>\$students = ".print_r($students,true)."</pre>";		
+			foreach($students as $studentidcourseids):
+				// make sure that the previous student's data doesn't carry forward
+				unset($student,$parms);
+				// get the divider between the studentid and the first courseid
+				$firstcommapos = strpos($studentidcourseids,',');
+				if( $firstcommapos>0 ):
+					$studentid = substr($studentidcourseids,0,$firstcommapos);
+					$courseids = substr($studentidcourseids,$firstcommapos+1);
+					$temp = str_replace("'","",$courseids); // we don't want these wrapped in single quotes
+					$arrCourseids = explode(',',$temp);
+					
+					if( $courseids ):
+						// we can't pass a csv list as a parameter because it is seen as a single value with embedded commas
+						// -> convert the csv list to an array
+						// -> use get_in_or_equal() to create the list
+						// -> original specification for this function was to pass singlequote-delimited courseids
+						$temp = str_replace("'","",$courseids); // make sure the single quotes are gone
+						$arrCourseids = explode(',',$temp);
+						list($insql, $parms) = $DB->get_in_or_equal($arrCourseids);
+						$crs = "c.idnumber $insql";
+					endif;
+		
+					if( $studentid ):
+						$stu = "usr.idnumber = ?";
+						$parms[] = $studentid;
+					endif;
+				
+					if( $stu && $crs ):
+
+						// initialize each course with '0000-00-00'
+						// -> if the student has never logged in then we won't get anything back from Moodle
+						foreach($arrCourseids as $courseid):
+							$student[$courseid] = '0000-00-00';
+						endforeach;
+
+						$sql = "SELECT c.idnumber AS courseid, DATE( FROM_UNIXTIME( la.timeaccess ) ) AS lastaccessdate 
+								  FROM {user_lastaccess} la 
+								  JOIN {course} c ON la.courseid = c.id 
+								  JOIN {user} usr ON la.userid = usr.id 
+								 WHERE $crs 
+									   AND $stu";	
+						// get the dates
+						if($records = $DB->get_records_sql($sql,$parms)):
+							foreach($records as $record):
+								$student[strtolower($record->courseid)] = $record->lastaccessdate;
+							endforeach;
+						endif;
+						
+						$activity[$studentid] = $student;
+						
+					endif;
+				endif;
+			endforeach;
+
+			return json_encode($activity);
+
+		endif;
     }
-    // Returns description of method result value
+
+	/**
+	 * Returns description of method result value for get_group_activity
+	 */
     public static function get_group_activity_returns() {
         return new external_value(PARAM_TEXT, 'For a group of students (specified by student ID numbers), returns date of last access for each course (specified in a csv list of course IDs) in a 2-D json array indexed by studentid and then by course ID number. Expected input: studentid,\'courseid\'|studentid,\'courseid\',\'courseid\'|studentid,\'courseid\'|etc.');
     }
@@ -372,7 +472,9 @@ IF...
 
 */
 
-    // Returns description of method parameters
+	/**
+	 * Returns description of method parameters for get_gradebook
+	 */
     public static function get_gradebook_parameters() {
         return new external_function_parameters(
 					array(
@@ -588,7 +690,7 @@ IF...
 			
 						// get this student's active date
 						$course['activedate'] = '';
-						if (self::$activation_trigger):
+						if (self::$activationtrigger):
 							$activesql = "SELECT gg.finalgrade, gg.timemodified
 															FROM {grade_grades} gg 
 															JOIN {grade_items} gi ON gi.id = gg.itemid 
@@ -758,7 +860,7 @@ IF...
 							$debugout .=  "<li>Course total... ".((isset($course['coursetotal'])) ? "$course[coursetotal]" : "N/A")."</li>\n";
 							$debugout .=  "<li>Moodle start date... ".((isset($course['moodlestartdate'])) ? "$course[moodlestartdate]" : "N/A")."</li>\n";
 							$debugout .=  "<li>Last access date... ".((isset($course['lastaccessdate'])) ? "$course[lastaccessdate]" : "N/A")."</li>\n";
-							if (self::$activation_trigger):
+							if (self::$activationtrigger):
 								$debugout .=  "<li>Declared active on... ".(($course['activedate']) ? "$course[activedate]" : "N/A")."</li>\n";
 							endif;
 							$debugout .=  "<li>Date of most recent mark... ".(($course['mostrecentmarkdate']) ? "$course[mostrecentmarkdate]" : "N/A")."</li>\n";
@@ -852,9 +954,9 @@ IF...
 			global $DB;
 			$categories = array();
 			$weightingTypes = array();
-			$weightingTypes[MEAN_OF_GRADES] = "MEAN_OF_GRADES";
-			$weightingTypes[WEIGHTED_MEAN] = "WEIGHTED_MEAN";
-			$weightingTypes[SIMPLE_WEIGHTED_MEAN] = "SIMPLE_WEIGHTED_MEAN";
+			$weightingTypes[LOCAL_WSSIM_MEAN_OF_GRADES] = "MEAN_OF_GRADES";
+			$weightingTypes[LOCAL_WSSIM_WEIGHTED_MEAN] = "WEIGHTED_MEAN";
+			$weightingTypes[LOCAL_WSSIM_SIMPLE_WEIGHTED_MEAN] = "SIMPLE_WEIGHTED_MEAN";
 
 			// This subquery won't work because there might be differently weighted items in a "weighted mean" category 
 			//	,	( SELECT SUM(grademax) FROM mdl_grade_items WHERE categoryid = gi.iteminstance ) AS categorymax 
@@ -926,7 +1028,7 @@ IF...
 			foreach( $records as $record ):
 				$item = (array)$record;
 				if( $debug) echo "item $item[itemid]: \$categories[$item[categoryid]]['weightingtype']=".self::$categories[$item['categoryid']]['weightingtype']."<br>";
-				if( self::$categories[$item['categoryid']]['weightingtype']==SIMPLE_WEIGHTED_MEAN || self::$categories[$item['categoryid']]['weightingtype']==MEAN_OF_GRADES ) $item['itemweight']=1; // in case this was previously changed from WEIGHTED_MEAN
+				if( self::$categories[$item['categoryid']]['weightingtype']==LOCAL_WSSIM_SIMPLE_WEIGHTED_MEAN || self::$categories[$item['categoryid']]['weightingtype']==LOCAL_WSSIM_MEAN_OF_GRADES ) $item['itemweight']=1; // in case this was previously changed from LOCAL_WSSIM_WEIGHTED_MEAN
 				$items[$item['itemid']] = $item;
 				$categorytotals[$item['categoryid']] += $item['grademax']*$item['itemweight'];
 				//if ($debug)	self::$itemsout .=  "<li>itemid=$item[itemid], categoryid=$item[categoryid], grademax=$item[grademax], itemname=$item[itemname], sortorder=$item[sortorder], category total (so far)=".self::$categorytotals[$item['categoryid']]."</li>\n";
@@ -940,7 +1042,7 @@ IF...
 			endforeach;
 			
 			// see if this course has an activation_trigger assignment
-			self::$activation_trigger = 0;
+			self::$activationtrigger = 0;
 			$triggersql = "SELECT gi.* 
 											 FROM {grade_items} gi
 											 JOIN {course} c ON c.id = gi.courseid 
@@ -948,9 +1050,9 @@ IF...
 													  $crs";
 			$records = $DB->get_records_sql($triggersql,$crsparms);
 			foreach( $records as $record ):
-				self::$activation_trigger = 1;
+				self::$activationtrigger = 1;
 			endforeach;
-			if ($debug)	self::$itemsout .=  "<p>This course ".((self::$activation_trigger) ? 'HAS' : 'DOES NOT HAVE' )." an activation_trigger</p>\n";													
+			if ($debug)	self::$itemsout .=  "<p>This course ".((self::$activationtrigger) ? 'HAS' : 'DOES NOT HAVE' )." an activation_trigger</p>\n";													
 					
 //			// get rid of any categories that have no items
 //			foreach(self::$categorytotals as $categoryid=>$total):
@@ -969,8 +1071,10 @@ IF...
 			return $items;
 		
 		}
-		
-    // Returns description of method result value
+	
+	/**
+	 * Returns description of method result value for get_gradebook
+	 */
     public static function get_gradebook_returns() {
         return new external_value(PARAM_RAW, 'Returns Moodle grade book as follows:<ol><li>course specified, but not student --> return summary info for all students in specified course</li>
 									<li>student specified, but not course --> return summary info for all courses for specified student</li>
@@ -980,44 +1084,46 @@ IF...
 // UPDATE EXCLUDED ///////////////////////////////////////////////////////////////////////////////////////////
 // Set or clear "excluded" status of a gradebook item (or list of items)
 
-    // Returns description of method parameters
+	/**
+	 * Returns description of method parameters for update_excluded
+	 */
     public static function update_excluded_parameters() {
         return new external_function_parameters(
-					array(
-						'courseid' => new external_value(PARAM_TEXT, 'A course ID number (SIM\'s courseid).', VALUE_DEFAULT, ''),
-						'studentid' => new external_value(PARAM_TEXT, 'A student ID number (PEN).', VALUE_DEFAULT, ''),
-						'itemids' => new external_value(PARAM_TEXT, 'Moodle\'s ID of a gradebook item (single value or csv list)', VALUE_DEFAULT, ''),
-						'newvalue' => new external_value(PARAM_TEXT, 'New value for exluded status (0 or UNIX timestamp)', VALUE_DEFAULT, '')
-					)
+			array(
+				'courseid' => new external_value(PARAM_TEXT, 'A course ID number (SIM\'s courseid).', VALUE_DEFAULT, ''),
+				'studentid' => new external_value(PARAM_TEXT, 'A student ID number (PEN).', VALUE_DEFAULT, ''),
+				'itemids' => new external_value(PARAM_TEXT, 'Moodle\'s ID of a gradebook item (single value or csv list)', VALUE_DEFAULT, ''),
+				'newvalue' => new external_value(PARAM_TEXT, 'New value for exluded status (0 or UNIX timestamp)', VALUE_DEFAULT, '')
+			)
         );
     }
     // Sets exluded status of specified gradebook item for specified student
     public static function update_excluded($courseid, $studentid, $itemids, $newvalue) {
 			
-			global $DB;
-			
-			//Parameter validation -- REQUIRED
-			$params = self::validate_parameters(self::update_excluded_parameters(),
-					array('courseid' => $courseid, 'studentid' => $studentid, 'itemids' => $itemids, 'newvalue' => $newvalue)
-			);
-			//echo "<pre>\$params = ".print_r($params,true);
-			
-			// get user object from student ID
-			$user = $DB->get_record('user', array('idnumber' => $studentid));
-			//echo "<pre>\$user->id = $user->id";
-			
-			// get course object from course ID
-			$course = $DB->get_record('course', array('idnumber' => $courseid));
-			//echo "<pre>\$course->id = $course->id";
-			
-			$itemidsArray = explode(',',$itemids);
-			//echo "<pre>\$itemidsArray = ".print_r($itemidsArray,true);
+		global $DB;
+		
+		//Parameter validation -- REQUIRED
+		$params = self::validate_parameters(self::update_excluded_parameters(),
+				array('courseid' => $courseid, 'studentid' => $studentid, 'itemids' => $itemids, 'newvalue' => $newvalue)
+		);
+		//echo "<pre>\$params = ".print_r($params,true);
+		
+		// get user object from student ID
+		$user = $DB->get_record('user', array('idnumber' => $studentid));
+		//echo "<pre>\$user->id = $user->id";
+		
+		// get course object from course ID
+		$course = $DB->get_record('course', array('idnumber' => $courseid));
+		//echo "<pre>\$course->id = $course->id";
+		
+		$itemidsArray = explode(',',$itemids);
+		//echo "<pre>\$itemidsArray = ".print_r($itemidsArray,true);
 
-			foreach($itemidsArray as $itemid):
-				// get grade_item object
-				if (!$grade_item = grade_item::fetch(array('id'=>$itemid, 'courseid'=>$course->id))):
-						print_error('cannotfindgradeitem');
-				else:
+		foreach($itemidsArray as $itemid):
+			// get grade_item object
+			if (!$grade_item = grade_item::fetch(array('id'=>$itemid, 'courseid'=>$course->id))):
+				print_error('cannotfindgradeitem');
+			else:
 					//echo "<pre>\$grade_item = ".print_r($grade_item,true)."</pre>";
 		
 					//$course_item = grade_item::fetch(array('courseid'=>$course->id, 'itemtype'=>'course'));
@@ -1036,23 +1142,23 @@ AND c.idnumber='$courseid'";
 				echo "<pre>BEFORE<pre>coursetotal = $record->finalgrade";
 			endforeach;
 */
-					// get the grade_grade object for the selected item and user
-					$grade_grade = new grade_grade(array('userid' => $user->id, 'itemid' => $itemid), true);
-		
-					//echo "<br>\$grade_grade->excluded = ".print_r($grade_grade->excluded,true);
-					//echo "<br>state of \$grade_item->needsupdate: $grade_item->needsupdate";
-					////echo "<br>state of \$course_item->needsupdate: $course_item->needsupdate";
-		
-					// update the excluded flag
-					$grade_grade->set_excluded($newvalue);
-					
-					// force regrading of this item
-					$grade_item->force_regrading();
-					//$course_item->force_regrading();
+				// get the grade_grade object for the selected item and user
+				$grade_grade = new grade_grade(array('userid' => $user->id, 'itemid' => $itemid), true);
+	
+				//echo "<br>\$grade_grade->excluded = ".print_r($grade_grade->excluded,true);
+				//echo "<br>state of \$grade_item->needsupdate: $grade_item->needsupdate";
+				//echo "<br>state of \$course_item->needsupdate: $course_item->needsupdate";
+	
+				// update the excluded flag
+				$grade_grade->set_excluded($newvalue);
+				
+				// force regrading of this item
+				$grade_item->force_regrading();
+				//$course_item->force_regrading();
 		
 					//echo "<pre>AFTER<pre>\$grade_grade->excluded = ".print_r($grade_grade->excluded,true);
 					//echo "<br>state of \$grade_item->needsupdate: $grade_item->needsupdate";
-					////echo "<br>state of \$course_item->needsupdate: $course_item->needsupdate";
+					//echo "<br>state of \$course_item->needsupdate: $course_item->needsupdate";
 					
 /*
 			// get the course total AFTER excluding the mark
@@ -1070,18 +1176,21 @@ AND c.idnumber='$courseid'";
 				echo "<br>coursetotal = $record->finalgrade</pre>";
 			endforeach;
 */			
-				endif;
-				
-			endforeach;
+			endif;
 			
-			// force a gradebook regrade for this student
-			$result = grade_regrade_final_grades($course->id); //, $user->id, $grade_item); //);
-			//echo "<br>result of grade_regrade_final_grades(): ".print_r($result,true);			
-			
-			return $result;
+		endforeach;
+		
+		// force a gradebook regrade for this student
+		$result = grade_regrade_final_grades($course->id); //, $user->id, $grade_item); //);
+		//echo "<br>result of grade_regrade_final_grades(): ".print_r($result,true);			
+		
+		return $result;
 
     }
-    // Returns description of method result value
+
+	/**
+	 * Returns description of method result value for update_excluded
+	 */
     public static function update_excluded_returns() {
         return new external_value(PARAM_TEXT, 'Sets or clears exluded status for specified gradebook item for specified student. Returns 1 if successful.');
     }

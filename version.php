@@ -1,4 +1,11 @@
 <?php
+/**
+ * SIM Web Services
+ *
+ * @copyright 2015 lbtsoft
+ * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ *
+ */
 
 $plugin->version  = 2016071700;   // The (date) version of this module + 2 extra digital for daily versions
                                   // This version number is displayed into /admin/forms.php

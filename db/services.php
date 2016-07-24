@@ -1,7 +1,10 @@
 <?php
-
 /**
  * SIM Web Services local plugin external functions and service definitions.
+ *
+ * @copyright 2015 lbtsoft
+ * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ *
  */
 
 // We defined the web service functions to install.

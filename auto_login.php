@@ -1,13 +1,20 @@
 <?php
-
-// loads data from GET/POST vars into an HTML form and then passes them on to Moodle as POST vars
-
-// GET/POST data expected:
-//  username
-//  password
-//
-// RETURNS:
-//	Nothing
+/**
+ * SIM Web Services remote login function
+ *
+ * loads data from GET/POST vars into an HTML form and then passes them on to Moodle as POST vars
+ *
+ * GET/POST data expected:
+ *  username
+ *  password
+ *
+ * RETURNS:
+ *	Nothing
+ *
+ * @copyright 2015 lbtsoft
+ * @license http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
+ *
+ */
 
 $host = $_SERVER['SERVER_NAME'];
 
@@ -65,4 +72,4 @@ Validate();
 </body>
 </html>
 
-<?php endif; ?>
+<?php endif;
